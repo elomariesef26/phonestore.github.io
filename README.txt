@@ -26,15 +26,15 @@ Nécessaire pour charger les polices, l'export Excel et le scanner de
 codes-barres. Sans connexion, l'application reste utilisable mais ces
 fonctions précises seront indisponibles.
 
-DONNÉES ET COMPTE ADMIN — TRÈS IMPORTANT SI VOUS HÉBERGEZ LE SITE
---------------------------------------------------------------------
-En dehors de Claude.ai, les données (comptes, produits, ventes...) sont
-sauvegardées dans le stockage local de VOTRE navigateur (localStorage),
-lequel est strictement attaché à une seule ADRESSE EXACTE (protocole +
-domaine). Si l'écran "Créer le compte administrateur" réapparaît alors que
-vous avez déjà créé un compte, c'est presque toujours parce que la page a
-été rouverte depuis une adresse légèrement différente de celle utilisée la
-première fois — par exemple :
+DONNÉES — BASE DE DONNÉES LOCALE
+-----------------------------------
+En dehors de Claude.ai, les données (comptes, produits, ventes, stock,
+clients...) sont automatiquement sauvegardées dans une vraie base de
+données intégrée à votre navigateur (IndexedDB), attachée à une seule
+ADRESSE EXACTE (protocole + domaine). Si l'écran "Créer le compte
+administrateur" réapparaît alors que vous avez déjà créé un compte, c'est
+presque toujours parce que la page a été rouverte depuis une adresse
+légèrement différente de celle utilisée la première fois — par exemple :
    - http://monsite.com   vs   https://monsite.com
    - monsite.com          vs   www.monsite.com
    - une URL d'aperçu qui change à chaque génération (certains outils
@@ -49,7 +49,12 @@ Un petit texte technique en bas de l'écran de connexion indique le mode de
 stockage actif et l'adresse détectée — utile pour vérifier que vous êtes
 bien sur la même adresse à chaque fois.
 
-Le stockage local peut aussi être vidé si vous effacez les données de
+Premier lancement : vous serez invité à créer le compte administrateur,
+sans mot de passe préalable. Les lancements suivants retrouveront
+automatiquement ce compte et vos données, et vous resterez même connecté
+d'une session à l'autre tant que vous ne vous déconnectez pas.
+
+La base de données locale peut être vidée si vous effacez les données de
 navigation, utilisez la navigation privée, ou changez de navigateur/
 appareil. Pensez à utiliser régulièrement le bouton de sauvegarde
 (Paramètres → Sauvegarde) pour exporter vos données en sécurité.
