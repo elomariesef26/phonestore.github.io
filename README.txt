@@ -10,39 +10,51 @@ CONTENU DE L'ARCHIVE
 POUR UTILISER L'APPLICATION
 -----------------------------
 1. Gardez les 3 fichiers dans le même dossier (ne les séparez pas).
-2. Double-cliquez sur index.html pour l'ouvrir dans votre navigateur.
+2. Ouvrez index.html dans votre navigateur (double-clic, ou via votre
+   hébergement web si vous en utilisez un).
 
    ⚠️ IMPORTANT — Scanner de codes-barres :
-   Pour des raisons de sécurité, les navigateurs interdisent l'accès à la
-   caméra quand une page est ouverte directement depuis un fichier local
-   (file://). Pour que le scan par caméra fonctionne, il faut ouvrir
-   l'application via une adresse "http://" ou "https://", par exemple :
-     - en l'hébergeant sur un petit serveur local (ex: `python3 -m http.server`
-       dans le dossier, puis ouvrir http://localhost:8000)
-     - ou en la déposant sur un hébergement web (y compris gratuit)
-   Si vous ouvrez le fichier directement (file://), la SAISIE MANUELLE du
-   code-barres reste toujours disponible et fonctionne normalement.
+   Les navigateurs interdisent l'accès à la caméra sur une page ouverte en
+   fichier local (file://). Il faut une adresse "http://" ou "https://"
+   pour que le scan par caméra fonctionne (hébergement web, ou serveur
+   local via `python3 -m http.server`). La saisie manuelle du code reste
+   toujours disponible en file://.
 
 CONNEXION INTERNET
 --------------------
-L'application a besoin d'internet pour charger :
-   - les polices (Google Fonts)
-   - la bibliothèque d'export Excel (xlsx)
-   - la bibliothèque de scan de codes-barres (html5-qrcode)
-Sans connexion, l'application reste utilisable mais ces fonctions précises
-seront indisponibles.
+Nécessaire pour charger les polices, l'export Excel et le scanner de
+codes-barres. Sans connexion, l'application reste utilisable mais ces
+fonctions précises seront indisponibles.
 
-DONNÉES
---------
-Toutes les données (produits, clients, ventes, stock, utilisateurs...) sont
-sauvegardées automatiquement et sont PARTAGÉES entre toute personne qui ouvre
-cette même instance de l'application — pratique pour une équipe travaillant
-sur la même boutique.
+DONNÉES ET COMPTE ADMIN — TRÈS IMPORTANT SI VOUS HÉBERGEZ LE SITE
+--------------------------------------------------------------------
+En dehors de Claude.ai, les données (comptes, produits, ventes...) sont
+sauvegardées dans le stockage local de VOTRE navigateur (localStorage),
+lequel est strictement attaché à une seule ADRESSE EXACTE (protocole +
+domaine). Si l'écran "Créer le compte administrateur" réapparaît alors que
+vous avez déjà créé un compte, c'est presque toujours parce que la page a
+été rouverte depuis une adresse légèrement différente de celle utilisée la
+première fois — par exemple :
+   - http://monsite.com   vs   https://monsite.com
+   - monsite.com          vs   www.monsite.com
+   - une URL d'aperçu qui change à chaque génération (certains outils
+     d'hébergement rapide/preview attribuent une nouvelle adresse à
+     chaque déploiement)
 
-Premier lancement : vous serez invité à créer le compte administrateur.
+→ Solution : utilisez systématiquement la MÊME adresse exacte (idéalement
+  https://votredomaine.com, sans variante) pour accéder à la boutique au
+  quotidien.
+
+Un petit texte technique en bas de l'écran de connexion indique le mode de
+stockage actif et l'adresse détectée — utile pour vérifier que vous êtes
+bien sur la même adresse à chaque fois.
+
+Le stockage local peut aussi être vidé si vous effacez les données de
+navigation, utilisez la navigation privée, ou changez de navigateur/
+appareil. Pensez à utiliser régulièrement le bouton de sauvegarde
+(Paramètres → Sauvegarde) pour exporter vos données en sécurité.
 
 SÉCURITÉ
 ---------
 Les mots de passe sont protégés par un hachage simple, adapté à un usage
-boutique léger — ce n'est pas un niveau de sécurité bancaire. Ne l'utilisez
-pas pour protéger des données hautement sensibles.
+boutique léger — ce n'est pas un niveau de sécurité bancaire.
