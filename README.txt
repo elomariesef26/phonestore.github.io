@@ -20,6 +20,10 @@ POUR UTILISER L'APPLICATION
    local via `python3 -m http.server`). La saisie manuelle du code reste
    toujours disponible en file://.
 
+   📷 Photo produit : contrairement au scanner, la prise de photo (bouton
+   "Prendre une photo" dans la fiche produit) fonctionne même en ouvrant
+   le fichier directement (file://), sur mobile comme sur ordinateur.
+
 CONNEXION INTERNET
 --------------------
 Nécessaire pour charger les polices, l'export Excel et le scanner de
@@ -28,36 +32,24 @@ fonctions précises seront indisponibles.
 
 DONNÉES — BASE DE DONNÉES LOCALE
 -----------------------------------
-En dehors de Claude.ai, les données (comptes, produits, ventes, stock,
-clients...) sont automatiquement sauvegardées dans une vraie base de
-données intégrée à votre navigateur (IndexedDB), attachée à une seule
-ADRESSE EXACTE (protocole + domaine). Si l'écran "Créer le compte
-administrateur" réapparaît alors que vous avez déjà créé un compte, c'est
-presque toujours parce que la page a été rouverte depuis une adresse
-légèrement différente de celle utilisée la première fois — par exemple :
-   - http://monsite.com   vs   https://monsite.com
-   - monsite.com          vs   www.monsite.com
-   - une URL d'aperçu qui change à chaque génération (certains outils
-     d'hébergement rapide/preview attribuent une nouvelle adresse à
-     chaque déploiement)
-
-→ Solution : utilisez systématiquement la MÊME adresse exacte (idéalement
-  https://votredomaine.com, sans variante) pour accéder à la boutique au
-  quotidien.
+En dehors de Claude.ai, les données sont automatiquement sauvegardées dans
+une vraie base de données intégrée à votre navigateur (IndexedDB), attachée
+à une seule ADRESSE EXACTE (protocole + domaine). Si l'écran "Créer le
+compte administrateur" réapparaît alors que vous avez déjà créé un compte,
+c'est presque toujours parce que la page a été rouverte depuis une adresse
+légèrement différente — utilisez systématiquement la MÊME adresse exacte
+pour accéder à la boutique au quotidien.
 
 Un petit texte technique en bas de l'écran de connexion indique le mode de
-stockage actif et l'adresse détectée — utile pour vérifier que vous êtes
-bien sur la même adresse à chaque fois.
+stockage actif et l'adresse détectée.
 
-Premier lancement : vous serez invité à créer le compte administrateur,
-sans mot de passe préalable. Les lancements suivants retrouveront
-automatiquement ce compte et vos données, et vous resterez même connecté
-d'une session à l'autre tant que vous ne vous déconnectez pas.
+Premier lancement : vous serez invité à créer le compte administrateur.
+Les lancements suivants retrouveront automatiquement ce compte et vos
+données, et vous resterez connecté d'une session à l'autre.
 
-La base de données locale peut être vidée si vous effacez les données de
-navigation, utilisez la navigation privée, ou changez de navigateur/
-appareil. Pensez à utiliser régulièrement le bouton de sauvegarde
-(Paramètres → Sauvegarde) pour exporter vos données en sécurité.
+Pensez à utiliser régulièrement le bouton de sauvegarde (Paramètres →
+Sauvegarde) pour exporter vos données en sécurité. Les photos des produits
+sont incluses dans cette sauvegarde.
 
 SÉCURITÉ
 ---------

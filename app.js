@@ -114,6 +114,7 @@ const state = {
   productSearch: '',
   clientSearch: '',
   editingProduct: null,
+  productPhotoDraft: undefined,
   editingClient: null,
   editingUser: null,
   paymentClientId: null,
@@ -757,7 +758,12 @@ function renderProducts() {
         <tbody>
           ${list.map(p => `
             <tr>
-              <td data-label="Produit"><strong>${esc(p.name)}</strong><div class="muted" style="font-size:11.5px;">${esc(p.brand)} · ${esc(p.model)}</div></td>
+              <td data-label="Produit">
+                <div style="display:flex;align-items:center;gap:9px;">
+                  ${p.photo ? `<img class="product-thumb" src="${p.photo}" alt="">` : `<div class="product-thumb-placeholder">${ICONS.box}</div>`}
+                  <div><strong>${esc(p.name)}</strong><div class="muted" style="font-size:11.5px;">${esc(p.brand)} · ${esc(p.model)}</div></div>
+                </div>
+              </td>
               <td data-label="Catégorie" class="muted">${esc(p.category)}</td>
               <td data-label="SKU" class="mono muted">${esc(p.sku)}</td>
               ${canViewCosts ? `<td data-label="Achat" class="mono">${money(p.costPrice)}</td>` : ''}
@@ -780,13 +786,95 @@ function emptyState(icon, title, sub) {
   return `<div class="empty-state">${ICONS[icon] || ICONS.empty}<div class="title">${title}</div><div>${sub}</div></div>`;
 }
 
+// Resizes/compresses a chosen photo to a small JPEG data URL before storing
+// it — keeps the local database compact even with many product photos.
+function compressImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 480;
+        let { width, height } = img;
+        if (width > height && width > maxDim) { height = Math.round(height * (maxDim / width)); width = maxDim; }
+        else if (height > maxDim) { width = Math.round(width * (maxDim / height)); height = maxDim; }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.72));
+      };
+      img.onerror = () => reject(new Error('image invalide'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('lecture impossible'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Rebuilds only the photo preview + action buttons inside the product
+// modal — never a full render(), so whatever the person has already typed
+// into the other fields (name, price, stock…) is never lost.
+function refreshPhotoPreview() {
+  const preview = document.querySelector('#productModalOverlay .product-photo-preview');
+  const actions = document.querySelector('#productModalOverlay .product-photo-actions');
+  if (!preview || !actions) return;
+  const photoData = state.productPhotoDraft;
+  preview.innerHTML = photoData ? `<img src="${photoData}" alt="">` : `<div class="product-photo-placeholder">${ICONS.box}</div>`;
+  actions.innerHTML = `
+    <button type="button" class="btn btn-sm" id="takePhotoBtn">${ICONS.scan}Prendre une photo</button>
+    <button type="button" class="btn btn-sm" id="choosePhotoBtn">Choisir un fichier</button>
+    ${photoData ? `<button type="button" class="btn btn-sm btn-danger" id="removePhotoBtn">Supprimer</button>` : ''}
+    <input type="file" accept="image/*" capture="environment" id="f_photo_camera" style="display:none;">
+    <input type="file" accept="image/*" id="f_photo_file" style="display:none;">
+  `;
+  bindPhotoPickerEvents();
+}
+
+function bindPhotoPickerEvents() {
+  const takeBtn = document.getElementById('takePhotoBtn');
+  const chooseBtn = document.getElementById('choosePhotoBtn');
+  const removeBtn = document.getElementById('removePhotoBtn');
+  const cameraInput = document.getElementById('f_photo_camera');
+  const fileInput = document.getElementById('f_photo_file');
+  if (takeBtn && cameraInput) takeBtn.addEventListener('click', () => cameraInput.click());
+  if (chooseBtn && fileInput) chooseBtn.addEventListener('click', () => fileInput.click());
+  if (removeBtn) removeBtn.addEventListener('click', () => { state.productPhotoDraft = null; refreshPhotoPreview(); });
+  [cameraInput, fileInput].forEach(inp => {
+    if (!inp) return;
+    inp.addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        state.productPhotoDraft = await compressImageFile(file);
+        refreshPhotoPreview();
+      } catch (err) { console.error(err); toast("Impossible de charger cette image"); }
+    });
+  });
+}
+
 function renderProductModal() {
   const isNew = state.editingProduct === 'new';
-  const p = isNew ? { name: '', brand: '', model: '', category: 'Smartphones', costPrice: '', sellPrice: '', stock: '', sku: '', lowStock: 3 } : state.editingProduct;
+  const p = isNew ? { name: '', brand: '', model: '', category: 'Smartphones', costPrice: '', sellPrice: '', stock: '', sku: '', lowStock: 3, photo: null } : state.editingProduct;
+  const photoData = state.productPhotoDraft !== undefined ? state.productPhotoDraft : (p.photo || null);
   return `
   <div class="modal-overlay" id="productModalOverlay">
     <div class="modal">
       <h2>${isNew ? 'Nouveau produit' : 'Modifier le produit'}</h2>
+      <div class="field">
+        <label>Photo du produit</label>
+        <div class="product-photo-picker">
+          <div class="product-photo-preview">
+            ${photoData ? `<img src="${photoData}" alt="">` : `<div class="product-photo-placeholder">${ICONS.box}</div>`}
+          </div>
+          <div class="product-photo-actions">
+            <button type="button" class="btn btn-sm" id="takePhotoBtn">${ICONS.scan}Prendre une photo</button>
+            <button type="button" class="btn btn-sm" id="choosePhotoBtn">Choisir un fichier</button>
+            ${photoData ? `<button type="button" class="btn btn-sm btn-danger" id="removePhotoBtn">Supprimer</button>` : ''}
+            <input type="file" accept="image/*" capture="environment" id="f_photo_camera" style="display:none;">
+            <input type="file" accept="image/*" id="f_photo_file" style="display:none;">
+          </div>
+        </div>
+      </div>
       <div class="field"><label>Nom du produit</label><input id="f_name" value="${esc(p.name)}" placeholder="iPhone 14, Coque silicone…"></div>
       <div class="field-row">
         <div class="field"><label>Marque</label><input id="f_brand" value="${esc(p.brand)}" placeholder="Apple, Samsung…"></div>
@@ -1049,6 +1137,7 @@ function renderPOS() {
         <div class="pos-grid">
           ${list.map(p => `
             <button class="pos-product" data-add-cart="${p.id}" ${p.stock <= 0 ? 'disabled style="opacity:.45;cursor:not-allowed;"' : ''}>
+              ${p.photo ? `<img class="photo" src="${p.photo}" alt="">` : `<div class="photo-placeholder">${ICONS.box}</div>`}
               <div class="name">${esc(p.name)}</div>
               <div class="meta">${esc(p.brand)} · ${esc(p.model)}<br><span class="mono">${esc(p.sku)}</span></div>
               <div class="foot">
@@ -1107,15 +1196,15 @@ function renderPOS() {
             <option value="" ${state.posClientId === '' ? 'selected' : ''}>Client de passage</option>
             ${state.clients.map(c => `<option value="${c.id}" ${state.posClientId === c.id ? 'selected' : ''}>${esc(c.name)} (${esc(c.clientCode || '')})</option>`).join('')}
           </select>
-          <div class="paid-row">
+          <div class="paid-row" style="margin-bottom:0;">
             <label>Montant payé</label>
             <input type="text" inputmode="decimal" autocomplete="off" id="posPaidAmount" value="${esc(paidDisplay)}">
           </div>
-          ${paidNum < total ? `<div class="muted" style="font-size:11.5px;margin-bottom:10px;">Reste dû : <strong style="color:var(--danger)">${money(total - paidNum)} DH</strong> — nécessite un client identifié</div>` : ''}
-          <button class="btn btn-primary" id="checkoutBtn" style="width:100%;justify-content:center;padding:11px 0;font-size:14px;" ${cartLines.length === 0 ? 'disabled' : ''}>
-            Encaisser la vente
-          </button>
+          ${paidNum < total ? `<div class="muted" style="font-size:11.5px;margin-top:6px;">Reste dû : <strong style="color:var(--danger)">${money(total - paidNum)} DH</strong> — nécessite un client identifié</div>` : ''}
         </div>
+        <button class="btn btn-primary" id="checkoutBtn" style="width:100%;justify-content:center;padding:12px 0;font-size:14px;flex-shrink:0;" ${cartLines.length === 0 ? 'disabled' : ''}>
+          Encaisser la vente
+        </button>
       </div>
     </div>
   `;
@@ -1777,12 +1866,16 @@ function bindEvents() {
 
   /* Products */
   const addProductBtn = document.getElementById('addProductBtn');
-  if (addProductBtn) addProductBtn.addEventListener('click', () => { state.editingProduct = 'new'; render(); });
+  if (addProductBtn) addProductBtn.addEventListener('click', () => { state.editingProduct = 'new'; state.productPhotoDraft = null; render(); });
   const scanProductBtn = document.getElementById('scanProductBtn');
   if (scanProductBtn) scanProductBtn.addEventListener('click', () => openScanner('products'));
   const productSearch = document.getElementById('productSearch');
   if (productSearch) productSearch.addEventListener('input', (e) => { state.productSearch = e.target.value; refreshContent(); });
-  document.querySelectorAll('[data-edit-product]').forEach(el => el.addEventListener('click', () => { state.editingProduct = state.products.find(p => p.id === el.dataset.editProduct); render(); }));
+  document.querySelectorAll('[data-edit-product]').forEach(el => el.addEventListener('click', () => {
+    state.editingProduct = state.products.find(p => p.id === el.dataset.editProduct);
+    state.productPhotoDraft = state.editingProduct ? (state.editingProduct.photo || null) : null;
+    render();
+  }));
   document.querySelectorAll('[data-delete-product]').forEach(el => el.addEventListener('click', async () => {
     if (!confirm('Supprimer ce produit ?')) return;
     const p = state.products.find(pp => pp.id === el.dataset.deleteProduct);
@@ -1791,8 +1884,9 @@ function bindEvents() {
     render();
   }));
   const cancelProductModal = document.getElementById('cancelProductModal');
-  if (cancelProductModal) cancelProductModal.addEventListener('click', () => { state.editingProduct = null; render(); });
+  if (cancelProductModal) cancelProductModal.addEventListener('click', () => { state.editingProduct = null; state.productPhotoDraft = undefined; render(); });
   const productModalOverlay = document.getElementById('productModalOverlay');
+  if (productModalOverlay) bindPhotoPickerEvents();
   const saveProductModal = document.getElementById('saveProductModal');
   if (saveProductModal) saveProductModal.addEventListener('click', async () => {
     const name = document.getElementById('f_name').value.trim();
@@ -1803,6 +1897,7 @@ function bindEvents() {
       category: document.getElementById('f_category').value, sku: document.getElementById('f_sku').value.trim(),
       costPrice: parseFloat(document.getElementById('f_cost').value) || 0, sellPrice: parseFloat(document.getElementById('f_sell').value) || 0,
       stock: parseInt(document.getElementById('f_stock').value) || 0, lowStock: parseInt(document.getElementById('f_low').value) || 0,
+      photo: state.productPhotoDraft || null,
     };
     if (isNewProduct) {
       const newProduct = { id: uid('p'), ...data };
@@ -1830,7 +1925,7 @@ function bindEvents() {
       await logOperation('Modification produit', name);
       await saveProducts();
     }
-    state.editingProduct = null; render();
+    state.editingProduct = null; state.productPhotoDraft = undefined; render();
   });
 
   /* Clients */
@@ -2309,11 +2404,40 @@ function scannerModalHTML(context) {
           </div>
         </div>
         <div class="scanner-status" id="scannerStatusText"></div>
+        ${context === 'pos' ? `
+        <div class="field" style="margin-top:6px;">
+          <label>Produits scannés dans cette session</label>
+          <div id="scannedItemsList" class="scanned-items-list"></div>
+        </div>
+        ` : ''}
         <div class="modal-actions">
           <button class="btn" id="scannerCloseBtn">Fermer</button>
         </div>
       </div>
     </div>`;
+}
+
+// Refreshes the live list of scanned products shown inside the scanner
+// modal itself. Only touches that one list element (a plain DOM update,
+// not the app's render() cycle) — the camera stream is a sibling node and
+// is never disturbed.
+function refreshScannedItemsList() {
+  const el = document.getElementById('scannedItemsList');
+  if (!el) return;
+  const lines = state.posCart.map(line => {
+    const p = state.products.find(pp => pp.id === line.productId);
+    return p ? { p, qty: line.qty } : null;
+  }).filter(Boolean);
+  if (lines.length === 0) {
+    el.innerHTML = `<div class="muted" style="font-size:12px;">Aucun produit scanné pour l'instant.</div>`;
+    return;
+  }
+  el.innerHTML = lines.map(l => `
+    <div class="scanned-item-row">
+      <span>${esc(l.p.name)}</span>
+      <span class="mono">${l.qty} × ${money(l.p.sellPrice)} = <strong>${money(l.qty * l.p.sellPrice)}</strong> DH</span>
+    </div>
+  `).join('');
 }
 
 function openScanner(context) {
@@ -2323,6 +2447,7 @@ function openScanner(context) {
   overlay.innerHTML = scannerModalHTML(context);
   overlay.style.display = 'flex';
   bindScannerEvents();
+  if (context === 'pos') refreshScannedItemsList();
   setScannerStatus(context === 'pos'
     ? 'Scannez un article pour l’ajouter au panier, ou saisissez son code manuellement.'
     : 'Scannez le code du produit, ou saisissez-le manuellement.');
@@ -2374,7 +2499,10 @@ async function startScannerCamera() {
       { fps: 10, qrbox: { width: 260, height: 140 } },
       (decodedText) => {
         const now = Date.now();
-        if (decodedText === lastScanCode && now - lastScanTime < 1800) return; // ignore repeated reads of the same code
+        // Short cooldown to avoid one physical hold firing many times per
+        // second (fps:10), while still letting the SAME product be scanned
+        // again quickly to increment its quantity further.
+        if (now - lastScanTime < 700) return;
         lastScanCode = decodedText; lastScanTime = now;
         handleScannedCode(decodedText);
       },
@@ -2416,6 +2544,7 @@ function handleScannedCode(code) {
       bumpCartLine(product.id, qtyToAdd, product.stock);
       state.posPaidOverride = null;
       refreshPOS(); // only touches #content inside #root — the scanner overlay is untouched
+      refreshScannedItemsList(); // updates the list inside the scanner modal itself
       setScannerStatus(`✓ Ajouté au panier : ${qtyToAdd}× ${product.name}`);
     } else {
       setScannerStatus(`Aucun produit trouvé avec le code "${trimmed}".`, true);
