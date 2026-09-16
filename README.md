@@ -73,7 +73,7 @@ La restauration applique également les migrations connues : permissions utilisa
 
 ## Import Excel
 
-L’import Excel utilise principalement les feuilles `Produits`, `Stock & Prix` et `Clients`. Il vérifie les Code P dupliqués, les quantités entières non négatives et les prix valides avant de remplacer le catalogue importé.
+L’import Excel utilise principalement les feuilles `Produits`, `Stock & Prix` et `Clients`. Il vérifie les Code P dupliqués, les quantités entières non négatives et les prix valides. L’import est additif : les produits, clients et achats déjà présents sont ignorés selon leur Code P, leurs identifiants ou leurs clés de bon ; seules les nouvelles lignes sont enregistrées.
 
 Les photos déjà présentes sont conservées par correspondance de Code P lorsque le produit reste identifiable. Les ventes, paiements, fournisseurs, factures et utilisateurs ne sont pas remplacés par cet import catalogue. Une sauvegarde JSON doit néanmoins être réalisée avant tout import important.
 
@@ -87,7 +87,7 @@ Les valeurs affichées provenant des données sont échappées avant insertion d
 
 Un test rapide a été effectué avec un compte et un produit fictifs. Il a vérifié la création d’un produit avec un stock initial, l’archivage et la réactivation, l’exclusion du produit archivé dans la caisse, l’ajout au panier, l’encaissement d’une vente fictive, la génération du reçu, la décrémentation du stock de 5 à 4 unités et l’apparition de la vente dans l’historique.
 
-Pour repartir d’un environnement vide, utilisez **Paramètres → Sauvegarde → Zone dangereuse**. Cette action est irréversible. Exportez une sauvegarde JSON avant de vider les données.
+Pour repartir d’un environnement vide, utilisez **Paramètres → Sauvegarde → Zone dangereuse**. Les options permettent de supprimer les achats et le stock, les ventes et paiements, le catalogue avec clients et fournisseurs, les services et comptes rechargeables, ou **toutes les données et tous les paramètres** de l’application. Cette action est irréversible. Exportez une sauvegarde JSON avant de vider les données.
 
 ## Développement et vérifications
 

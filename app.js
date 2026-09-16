@@ -862,7 +862,7 @@ function bindLanguageSelector() {
 
 /* ---------------- Utilities ---------------- */
 function uid(prefix) { return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
-function money(n) { return (Number(n) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function money(n) { return (Number(n) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/[\u202f\u00a0]/g, ' '); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function safeImageSrc(value) {
   const src = String(value || '');
@@ -3298,20 +3298,43 @@ function exportStockSituationXLSX() {
   const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Situation stock');
   XLSX.writeFile(wb, `phonestock-situation-stock-${localDateInputValue()}.xlsx`); toast('Situation du stock exportée en Excel');
 }
+function pdfReportIdentity(doc, title, subtitle = '') {
+  const b = state.branding || {}; const margin = 10; let y = 12;
+  if (safeImageSrc(b.icon)) { try { doc.addImage(b.icon, 'PNG', doc.internal.pageSize.getWidth() - margin - 18, 8, 18, 18); } catch (e) {} }
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.text(String(b.companyName || getAppName()), margin, y); y += 5;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
+  [getAppSubtitle(), b.companyAddress, b.companyPhone ? `Tél. : ${b.companyPhone}` : '', b.companyEmail, b.companyId ? `Identifiant : ${b.companyId}` : ''].filter(Boolean).forEach(line => { doc.text(String(line), margin, y, { maxWidth: doc.internal.pageSize.getWidth() - 45 }); y += 4.2; });
+  y += 2; doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text(String(title), margin, y); y += 5;
+  if (subtitle) { doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.text(String(subtitle), margin, y); y += 5; }
+  return y + 2;
+}
+function finalizePdfPagination(doc) {
+  const total = doc.internal.getNumberOfPages(); const placeholder = '{total_pages_count_string}';
+  for (let page = 1; page <= total; page += 1) { doc.setPage(page); const width = doc.internal.pageSize.getWidth(); const height = doc.internal.pageSize.getHeight(); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(90, 98, 105); doc.text(`Page ${page} / ${placeholder}`, width - 10, height - 6, { align: 'right' }); doc.setTextColor(0, 0, 0); }
+  if (typeof doc.putTotalPages === 'function') doc.putTotalPages(placeholder);
+}
+function pdfTable(doc, columns, rows, startY, options = {}) {
+  const margin = options.margin || 10; const width = doc.internal.pageSize.getWidth() - margin * 2; const bottom = doc.internal.pageSize.getHeight() - 14; let y = startY; const rowGap = options.rowGap || 3.6;
+  const widths = options.widths || columns.map(() => width / columns.length); const xs = []; let x = margin; widths.forEach(w => { xs.push(x); x += w; });
+  const numeric = value => /(?:DH|%|\d[\d ]*[,.]\d{2})/.test(String(value ?? ''));
+  const drawHead = () => { doc.setFillColor(225, 235, 234); doc.setDrawColor(170, 185, 183); doc.rect(margin, y - 4.2, width, 7, 'FD'); doc.setFont('helvetica', 'bold'); doc.setFontSize(7); columns.forEach((label, i) => doc.text(String(label), xs[i] + 1.5, y, { maxWidth: widths[i] - 3, align: i > 0 ? 'right' : 'left' })); y += 6; };
+  const drawRow = row => { const cells = row.map((value, i) => doc.splitTextToSize(String(value ?? ''), widths[i] - 3)); const h = Math.max(6, ...cells.map(cell => cell.length * rowGap + 2.5)); if (y + h > bottom) { finalizePdfPageMarker(doc); doc.addPage(); y = options.pageStart || 12; if (options.pageHeader) y = pdfReportIdentity(doc, options.pageHeader, options.pageSubtitle || ''); drawHead(); } doc.setFont('helvetica', 'normal'); doc.setFontSize(6.8); doc.setDrawColor(205, 215, 214); doc.rect(margin, y - 4.2, width, h, 'S'); cells.forEach((cell, i) => cell.forEach((line, j) => doc.text(line, numeric(row[i]) || i > 0 ? xs[i] + widths[i] - 1.5 : xs[i] + 1.5, y + j * rowGap, { maxWidth: widths[i] - 3, align: numeric(row[i]) || i > 0 ? 'right' : 'left' }))); y += h; };
+  drawHead(); rows.forEach(drawRow); return y;
+}
+function finalizePdfPageMarker(doc) { const page = doc.internal.getNumberOfPages(); doc.setPage(page); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(90, 98, 105); doc.text(`Page ${page}`, doc.internal.pageSize.getWidth() - 10, doc.internal.pageSize.getHeight() - 6, { align: 'right' }); doc.setTextColor(0, 0, 0); }
+
 function exportStockSituationPDF() {
   if (!window.jspdf || !window.jspdf.jsPDF) { toast('Bibliothèque PDF indisponible — vérifiez votre connexion.'); return; }
   const data = buildStockSituationData();
   const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
-  const margin = 10; let y = 14;
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text('PhoneStock - Situation du stock', margin, y); y += 7;
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text(`Généré le ${fmtDateTime(new Date())}`, margin, y); y += 8;
+  const margin = 10; let y = pdfReportIdentity(doc, 'Situation du stock', `Généré le ${fmtDateTime(new Date())}`);
   doc.setFontSize(9); doc.text(`Produits en stock : ${data.totalProducts} · Quantité totale : ${data.totalQuantity} · Valeur achat : ${money(data.totalCostValue)} DH`, margin, y); y += 8;
   const xs = [margin, 65, 112, 143, 163, 183]; const headers = ['Produit', 'Catégorie', 'Code P', 'Stock', 'Lots', 'Valeur achat'];
   const drawHeader = () => { doc.setFillColor(228, 234, 238); doc.rect(margin, y - 4, 277, 7, 'F'); doc.setFont('helvetica', 'bold'); doc.setFontSize(7); headers.forEach((h, i) => doc.text(h, xs[i], y)); y += 6; doc.setFont('helvetica', 'normal'); doc.setFontSize(7); };
   drawHeader();
   data.rows.forEach(row => { if (y > 190) { doc.addPage(); y = 14; drawHeader(); } doc.text(doc.splitTextToSize(row.product, 53), xs[0], y); doc.text(doc.splitTextToSize(row.category, 45), xs[1], y); doc.text(doc.splitTextToSize(row.sku, 29), xs[2], y); doc.text(String(row.quantity), xs[3], y); doc.text(String(row.lots), xs[4], y); doc.text(`${money(row.costValue)} DH`, xs[5], y); y += 6; });
   doc.setFont('helvetica', 'bold'); doc.text('TOTAL', xs[0], y + 2); doc.text(String(data.totalQuantity), xs[3], y + 2); doc.text(`${money(data.totalCostValue)} DH`, xs[5], y + 2);
-  doc.save(`phonestock-situation-stock-${localDateInputValue()}.pdf`); toast('Situation du stock exportée en PDF');
+  finalizePdfPagination(doc); doc.save(`phonestock-situation-stock-${localDateInputValue()}.pdf`); toast('Situation du stock exportée en PDF');
 }
 
 function operationPeriodLabel(period) {
@@ -3327,21 +3350,23 @@ function exportOperationsReportPDF() {
   const margin = 10; const pageWidth = 297; const right = pageWidth - margin;
   const periodText = `${fmtDate(`${data.range.from}T00:00:00`)} -> ${fmtDate(`${data.range.to}T00:00:00`)}`;
   let y = 14;
-  const header = title => { doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text(title, margin, y); y += 7; doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text(`${operationPeriodLabel(data.range.period)} · ${periodText} · Généré le ${fmtDateTime(new Date())}`, margin, y); y += 7; };
+  const header = title => { y = pdfReportIdentity(doc, title, `${operationPeriodLabel(data.range.period)} · ${periodText} · Généré le ${fmtDateTime(new Date())}`); };
   const section = title => { if (y > 185) { doc.addPage(); y = 14; } doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text(title, margin, y); y += 5; };
   const table = (headers, rows, widths, totalRow = null) => {
     const xs = []; let x = margin; widths.forEach(w => { xs.push(x); x += w; });
-    const drawHead = () => { doc.setFillColor(228, 234, 238); doc.rect(margin, y - 4, right - margin, 7, 'F'); doc.setFont('helvetica', 'bold'); doc.setFontSize(6.8); headers.forEach((h, i) => doc.text(h, xs[i], y)); y += 6; doc.setFont('helvetica', 'normal'); doc.setFontSize(6.6); };
+    const isAmount = value => /(?:DH|%|\d[\d ]*[,.]\d{2})/.test(String(value ?? ''));
+    const drawHead = () => { doc.setFillColor(228, 234, 238); doc.setDrawColor(175, 185, 185); doc.rect(margin, y - 4, right - margin, 7, 'FD'); doc.setFont('helvetica', 'bold'); doc.setFontSize(6.8); headers.forEach((h, i) => doc.text(h, i > 1 ? xs[i] + widths[i] - 1 : xs[i] + 1, y, { maxWidth: widths[i] - 2, align: i > 1 ? 'right' : 'left' })); y += 6; doc.setFont('helvetica', 'normal'); doc.setFontSize(6.6); };
     drawHead();
-    rows.forEach(row => { const cells = row.map((cell, i) => doc.splitTextToSize(String(cell ?? ''), widths[i] - 2)); const h = Math.max(6, ...cells.map(c => c.length * 3)); if (y + h > 195) { doc.addPage(); y = 14; header('PhoneStock — Rapport des opérations'); section(headers.join(' · ')); drawHead(); } cells.forEach((cell, i) => doc.text(cell, xs[i], y)); y += h; });
+    rows.forEach(row => { const cells = row.map((cell, i) => doc.splitTextToSize(String(cell ?? ''), widths[i] - 2)); const h = Math.max(6, ...cells.map(c => c.length * 4 + 2)); if (y + h > 195) { doc.addPage(); y = 14; header('PhoneStock — Rapport des opérations'); section(headers.join(' · ')); drawHead(); } doc.setDrawColor(215, 220, 220); doc.rect(margin, y - 4, right - margin, h, 'S'); cells.forEach((cell, i) => cell.forEach((line, j) => { const rightAligned = isAmount(row[i]) || i > 1; doc.text(line, rightAligned ? xs[i] + widths[i] - 1 : xs[i] + 1, y + j * 4, { maxWidth: widths[i] - 2, align: rightAligned ? 'right' : 'left' }); })); y += h; });
     if (totalRow) { doc.setFont('helvetica', 'bold'); doc.setFillColor(242, 245, 246); doc.rect(margin, y - 3, right - margin, 7, 'F'); totalRow.forEach((cell, i) => doc.text(String(cell ?? ''), xs[i], y)); y += 8; doc.setFont('helvetica', 'normal'); }
   };
   header('PhoneStock — Rapport des opérations');
   section('Synthèse financière');
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
-  doc.text(`Ventes nettes : ${money(data.salesAmount)} DH`, margin, y); doc.text(`Achats : ${money(data.purchasesAmount)} DH`, 62, y); doc.text(`Net ventes - achats : ${money(data.net)} DH`, 112, y); doc.text(`Marge ventes : ${money(data.salesMargin)} DH`, 178, y); doc.text(`Remises : ${money(data.salesDiscount)} DH`, 235, y); y += 9;
-  doc.text(`Marge produits : ${money(financial.productMargin)} DH`, margin, y); doc.text(`Marge recharges : ${money(financial.rechargeMargin)} DH`, 62, y); doc.text(`Marge services : ${money(financial.serviceMargin)} DH`, 112, y); doc.text(`Dépenses courantes : ${money(financial.currentExpenses)} DH`, 178, y); doc.text(`Bénéfice estimé : ${money(financial.estimatedProfit)} DH`, 235, y); y += 9;
-  doc.text(`Achats de stock : ${money(financial.stockPurchases)} DH`, margin, y); doc.text(`Équipements : ${money(financial.equipmentPurchases)} DH`, 82, y); doc.text(`Solde recharges : ${money(financial.rechargeBalance)} DH`, 150, y); doc.text(`Reste capital : ${money(financial.remainingCapital)} DH`, 225, y); y += 9;
+  y = table(['Indicateur financier', 'Montant'], [
+    ['Ventes nettes', `${money(data.salesAmount)} DH`], ['Achats', `${money(data.purchasesAmount)} DH`], ['Net ventes - achats', `${money(data.net)} DH`], ['Marge ventes', `${money(data.salesMargin)} DH`], ['Remises', `${money(data.salesDiscount)} DH`],
+    ['Marge produits', `${money(financial.productMargin)} DH`], ['Marge recharges', `${money(financial.rechargeMargin)} DH`], ['Marge services', `${money(financial.serviceMargin)} DH`], ['Dépenses courantes', `${money(financial.currentExpenses)} DH`], ['Bénéfice estimé', `${money(financial.estimatedProfit)} DH`],
+    ['Achats de stock', `${money(financial.stockPurchases)} DH`], ['Équipements', `${money(financial.equipmentPurchases)} DH`], ['Solde recharges', `${money(financial.rechargeBalance)} DH`], ['Reste capital', `${money(financial.remainingCapital)} DH`]
+  ], [145, 75]);
   section('Détail des ventes');
   table(['Date', 'Produit / Code P', 'Qté', 'Prix achat', 'Prix vente', 'Remise', 'Net', 'Coût', 'Marge'], data.saleRows.map(r => [fmtDateTime(r.date), `${r.product} / ${r.sku}`, r.qty, `${money(r.unitCost)} DH`, `${money(r.unitPrice)} DH`, `${money(r.discount)} DH`, `${money(r.net)} DH`, `${money(r.cost)} DH`, `${money(r.margin)} DH`]), [25, 54, 12, 22, 22, 22, 22, 22, 22], ['TOTAL', '', data.salesUnits, '', '', `${money(data.salesDiscount)} DH`, `${money(data.salesAmount)} DH`, `${money(data.salesCost)} DH`, `${money(data.salesMargin)} DH`]);
   section('Détail des achats');
@@ -3352,11 +3377,39 @@ function exportOperationsReportPDF() {
   table(['Date', 'Référence', 'Client', 'Note', 'Montant'], data.paymentRows.map(r => [fmtDateTime(r.date), r.ref, r.party, r.note, `${money(r.amount)} DH`]), [30, 35, 55, 100, 30], ['TOTAL', '', '', '', `${money(data.paymentsAmount)} DH`]);
   section('Situation du stock');
   table(['Produit', 'Catégorie / Code P', 'Stock', 'Lots', 'Valeur achat'], stockData.rows.map(r => [r.product, `${r.category} / ${r.sku}`, r.quantity, r.lots, `${money(r.costValue)} DH`]), [65, 75, 22, 18, 45], ['TOTAL', '', stockData.totalQuantity, '', `${money(stockData.totalCostValue)} DH`]);
-  doc.setFont('helvetica', 'italic'); doc.setFontSize(7.5); doc.text('Le net commercial est calculé comme ventes nettes - achats. La marge des ventes est calculée avec le coût réel FIFO enregistré. Les paiements sont affichés séparément.', margin, 202, { maxWidth: right - margin });
+  doc.setFont('helvetica', 'italic'); doc.setFontSize(7.5); doc.text('Le net commercial est calculé comme ventes nettes - achats. La marge des ventes est calculée avec le coût réel FIFO enregistré. Les paiements sont affichés séparément.', margin, Math.min(y + 3, 202), { maxWidth: right - margin });
+  finalizePdfPagination(doc);
   doc.save(`phonestock-rapport-operations-${data.range.from}-${data.range.to}.pdf`); toast('Rapport PDF téléchargé');
 }
 
 function reportSectionEnabled(key) { return state.reportFilters?.sections?.[key] !== false; }
+function reportSectionActions(key) { return `<span class="report-section-actions"><button class="btn btn-sm" data-report-export="${key}:pdf">${ICONS.download}PDF</button><button class="btn btn-sm" data-report-export="${key}:xlsx">${ICONS.download}Excel</button></span>`; }
+function exportRenderedReportSection(key, format, sectionOverride = null) {
+  const section = sectionOverride || document.getElementById(`report-${key}`) || document.querySelector(`[data-report-section="${key}"]`);
+  if (!section) { toast('Section du rapport introuvable'); return; }
+  const title = section.querySelector('.section-title')?.innerText?.replace('↑','').trim() || key;
+  const rows = [];
+  const table = section.querySelector('table');
+  if (table) {
+    const headers = [...table.querySelectorAll('thead th')].map(cell => cell.innerText.trim());
+    if (headers.length) rows.push(headers);
+    table.querySelectorAll('tbody tr').forEach(tr => rows.push([...tr.querySelectorAll('td')].map(cell => cell.innerText.trim())));
+  } else {
+    section.querySelectorAll('dt').forEach(dt => rows.push([dt.innerText.trim(), dt.nextElementSibling?.innerText?.trim() || '']));
+    if (!rows.length) section.querySelectorAll('.stat-card').forEach(card => rows.push(card.innerText.split('\n').map(v => v.trim()).filter(Boolean)));
+  }
+  if (!rows.length) { toast('Aucune donnée dans cette section'); return; }
+  if (format === 'xlsx') { const hasTable = !!table; const headers = hasTable ? (rows[0] || ['Valeur']) : (rows[0]?.length === 2 ? ['Indicateur', 'Valeur'] : ['Valeur']); const body = hasTable ? rows.slice(1) : rows; downloadExcelRows(body.map(row => Object.fromEntries(headers.map((h, i) => [h || `Colonne ${i + 1}`, row[i] || '']))), `phonestock-rapport-${key}-${localDateInputValue()}.xlsx`, title); toast('Section Excel exportée'); return; }
+  if (!window.jspdf?.jsPDF) { toast('Bibliothèque PDF indisponible.'); return; }
+  const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const hasTable = !!table; const headers = hasTable ? (rows[0] || ['Valeur']) : (rows[0]?.length === 2 ? ['Indicateur', 'Valeur'] : ['Valeur']); const body = hasTable ? rows.slice(1) : rows;
+  const widths = headers.length === 1 ? [doc.internal.pageSize.getWidth() - 20] : headers.map((_, i) => i === 0 ? (doc.internal.pageSize.getWidth() - 20) * 0.62 : (doc.internal.pageSize.getWidth() - 20) * 0.38 / Math.max(1, headers.length - 1));
+  const y = pdfReportIdentity(doc, title, `Généré le ${fmtDateTime(new Date())}`);
+  pdfTable(doc, headers, body, y, { widths, pageHeader: title, pageSubtitle: `Généré le ${fmtDateTime(new Date())}` });
+  finalizePdfPagination(doc);
+  doc.save(`phonestock-rapport-${key}-${localDateInputValue()}.pdf`); toast('Section PDF exportée');
+}
+
 function buildPurchaseBonSummary(range, includeEquipment = false) {
   const start = range?.start?.getTime?.() ?? -Infinity;
   const end = range?.end?.getTime?.() ?? Infinity;
@@ -3427,8 +3480,8 @@ function renderMarginReports() {
       <div class="report-exclusions-toolbar"><button class="btn btn-sm" id="openReportExclusions">${ICONS.settings}Exclusions</button><span class="muted">Choisissez les sections, catégories et fournisseurs inclus dans le rapport.</span></div>${renderReportExclusionsModal()}
       <nav class="report-section-menu" id="reportSectionMenu" aria-label="Navigation du rapport"><strong>Sections du rapport</strong><a href="#report-sales">Ventes détaillées</a><a href="#report-purchases">Achats détaillés</a><a href="#report-purchase-bons">Synthèse des bons d’achat</a><a href="#report-stock">Situation du stock</a><a href="#report-product-performance">Performance par produit</a><a href="#report-daily-evolution">Évolution par jour</a></nav>
       <div class="muted mono" style="font-size:12px;margin-bottom:12px;">${operationPeriodLabel(operations.range.period)} : ${fmtDate(`${operations.range.from}T00:00:00`)} → ${fmtDate(`${operations.range.to}T00:00:00`)} · ${operations.rows.length} opération${operations.rows.length !== 1 ? 's' : ''}</div>
-      <div class="card report-financial-summary ${reportSectionEnabled('summary') ? '' : 'report-section-hidden'}" style="padding:18px;margin-bottom:16px;">
-        <div class="section-title">Synthèse financière de la période</div>
+      <div id="report-summary" data-report-section="summary" class="card report-financial-summary ${reportSectionEnabled('summary') ? '' : 'report-section-hidden'}" style="padding:18px;margin-bottom:16px;">
+        <div class="section-title">Synthèse financière de la période ${reportSectionActions('summary')}</div>
         <div class="muted" style="font-size:12px;margin:4px 0 14px 0;">Les marges sont calculées après remise. Les achats de stock et les équipements sont présentés séparément du bénéfice estimé.</div>
         <div class="report-summary-columns">
           <div><h4>Activité et revenus</h4><dl class="report-summary-list">
@@ -3455,19 +3508,19 @@ function renderMarginReports() {
         </div>
         <div class="report-summary-note">Le reste du capital = capital configuré − (stock restant au prix d’achat + prix d’achat des produits vendus + équipements acquis + solde des recharges immobilisé + recharges vendues).</div>
       </div>
-      <div class="grid dash-stats ${reportSectionEnabled('stats') ? '' : 'report-section-hidden'}" style="margin-bottom:16px;">
+      <div id="report-stats" data-report-section="stats" class="grid dash-stats ${reportSectionEnabled('stats') ? '' : 'report-section-hidden'}" style="margin-bottom:16px;">
         <div class="card stat-card"><div class="stat-label">Total ventes</div><div class="stat-value lcd">${money(operations.salesAmount)} <span style="font-size:13px;color:var(--muted)">DH</span></div><div class="stat-delta">${operations.sales.length} vente${operations.sales.length !== 1 ? 's' : ''} · ${operations.salesUnits} unité${operations.salesUnits !== 1 ? 's' : ''}</div></div>
         <div class="card stat-card"><div class="stat-label">Total achats</div><div class="stat-value">${money(operations.purchasesAmount)} <span style="font-size:13px;color:var(--muted)">DH</span></div><div class="stat-delta">${operations.purchases.length} achat${operations.purchases.length !== 1 ? 's' : ''} · ${operations.purchaseUnits} unité${operations.purchaseUnits !== 1 ? 's' : ''}</div></div>
         <div class="card stat-card"><div class="stat-label">Net ventes − achats</div><div class="stat-value" style="color:${operations.net >= 0 ? 'var(--success)' : 'var(--danger)'}">${money(operations.net)} <span style="font-size:13px;color:var(--muted)">DH</span></div><div class="stat-delta">Résultat de trésorerie commerciale avant autres charges</div></div>
         <div class="card stat-card"><div class="stat-label">Encaissements clients</div><div class="stat-value">${money(operations.paymentsAmount)} <span style="font-size:13px;color:var(--muted)">DH</span></div><div class="stat-delta">Affichés séparément, hors calcul du net</div></div>
-      </div>
-      ${operations.saleRows.length ? `<div id="report-sales" class="report-section ${reportSectionEnabled('sales') ? '' : 'report-section-hidden'}"><div class="section-title">Ventes détaillées <a class="report-back-to-menu" href="#reportSectionMenu" aria-label="Revenir au menu du rapport" title="Revenir au menu du rapport">↑</a></div><div style="overflow-x:auto;"><table class="rcard report-detail-table"><thead><tr><th>Date</th><th>Produit / Code P</th><th>Catégorie</th><th>Qté</th><th>Prix achat</th><th>Prix vente</th><th>Remise</th><th>Net</th><th>Coût</th><th>Marge</th></tr></thead><tbody>${operations.saleRows.map(row => `<tr><td data-label="Date" class="mono muted">${fmtDateTime(row.date)}</td><td data-label="Produit / Code P"><strong>${esc(row.product)}</strong><div class="muted mono" style="font-size:10px;">${esc(row.sku)}</div></td><td data-label="Catégorie" class="muted">${esc(row.category || '—')}</td><td data-label="Qté" class="mono">${row.qty}</td><td data-label="Prix achat" class="mono">${money(row.unitCost)} DH</td><td data-label="Prix vente" class="price">${money(row.unitPrice)} DH</td><td data-label="Remise" class="mono">${money(row.discount)} DH</td><td data-label="Net" class="price">${money(row.net)} DH</td><td data-label="Coût" class="mono">${money(row.cost)} DH</td><td data-label="Marge" class="price" style="color:var(--success)">${money(row.margin)} DH</td></tr>`).join('')}<tr class="report-total-row"><td data-label="Total"><strong>TOTAL VENTES</strong></td><td></td><td></td><td data-label="Qté"><strong>${operations.salesUnits}</strong></td><td></td><td></td><td data-label="Remise"><strong>${money(operations.salesDiscount)} DH</strong></td><td data-label="Net"><strong>${money(operations.salesAmount)} DH</strong></td><td data-label="Coût"><strong>${money(operations.salesCost)} DH</strong></td><td data-label="Marge"><strong>${money(operations.salesMargin)} DH</strong></td></tr></tbody></table></div></div>` : emptyState('history', 'Aucune vente', 'Aucune vente sur cette période.')}
-      ${operations.purchaseRows.length ? `<div id="report-purchases" class="report-section ${reportSectionEnabled('purchases') ? '' : 'report-section-hidden'}"><div class="section-title">Achats détaillés <a class="report-back-to-menu" href="#reportSectionMenu" aria-label="Revenir au menu du rapport" title="Revenir au menu du rapport">↑</a></div><div style="overflow-x:auto;"><table class="rcard report-detail-table"><thead><tr><th>Date</th><th>Produit / Code P</th><th>Catégorie</th><th>Qté</th><th>Prix achat</th><th>Prix vente prévu</th><th>Total achat</th><th>Valeur vente</th><th>Marge potentielle</th></tr></thead><tbody>${operations.purchaseRows.map(row => `<tr><td data-label="Date" class="mono muted">${fmtDateTime(row.date)}</td><td data-label="Produit / Code P"><strong>${esc(row.product)}</strong><div class="muted mono" style="font-size:10px;">${esc(row.sku)}</div></td><td data-label="Catégorie" class="muted">${esc(row.category || '—')}</td><td data-label="Qté" class="mono">${row.qty}</td><td data-label="Prix achat" class="mono">${money(row.unitCost)} DH</td><td data-label="Prix vente prévu" class="price">${money(row.unitPrice)} DH</td><td data-label="Total achat" class="mono">${money(row.totalPurchase)} DH</td><td data-label="Valeur vente" class="price">${money(row.saleValue)} DH</td><td data-label="Marge potentielle" class="price" style="color:var(--success)">${money(row.potentialMargin)} DH</td></tr>`).join('')}<tr class="report-total-row"><td data-label="Total"><strong>TOTAL ACHATS</strong></td><td></td><td></td><td data-label="Qté"><strong>${operations.purchaseUnits}</strong></td><td></td><td></td><td data-label="Total achat"><strong>${money(operations.purchasesAmount)} DH</strong></td><td data-label="Valeur vente"><strong>${money(operations.purchaseProjectedSale)} DH</strong></td><td data-label="Marge potentielle"><strong>${money(operations.purchasePotentialMargin)} DH</strong></td></tr></tbody></table></div></div>` : emptyState('cart', 'Aucun achat', 'Aucun achat sur cette période.')}
-      <div id="report-purchase-bons" class="report-section ${reportSectionEnabled('purchaseBons') ? '' : 'report-section-hidden'}"><div class="section-title">Synthèse des bons d’achat <a class="report-back-to-menu" href="#reportSectionMenu" aria-label="Revenir au menu du rapport" title="Revenir au menu du rapport">↑</a></div><label class="checkbox-row" style="margin:4px 0 10px;"><input type="checkbox" id="includeEquipmentInPurchaseBons" ${f.includeEquipmentInPurchaseBons ? 'checked' : ''}> Ajouter au coût total le montant des produits enregistrés comme équipements issus de chaque bon</label>${purchaseBonRows.length ? `<div style="overflow-x:auto;"><table class="rcard report-detail-table"><thead><tr><th>N Bon</th><th>Date</th><th>Fournisseur</th><th style="text-align:right;">Coût total</th></tr></thead><tbody>${purchaseBonRows.map(row => `<tr><td data-label="N Bon" class="mono"><strong>${esc(row.bonNumber)}</strong></td><td data-label="Date" class="mono muted">${fmtDateTime(row.date)}</td><td data-label="Fournisseur">${esc(row.supplier || 'Non spécifié')}</td><td data-label="Coût total" class="price">${money(row.total)} DH</td></tr>`).join('')}<tr class="report-total-row"><td data-label="Total"><strong>TOTAL</strong></td><td></td><td></td><td data-label="Coût total" class="price"><strong>${money(purchaseBonRows.reduce((sum, row) => sum + row.total, 0))} DH</strong></td></tr></tbody></table></div>` : emptyState('cart', 'Aucun bon d’achat', 'Aucun bon sur cette période.')}</div>
-      ${operations.paymentRows.length ? `<div class="report-section ${reportSectionEnabled('payments') ? '' : 'report-section-hidden'}"><div class="section-title">Paiements clients</div><div style="overflow-x:auto;"><table class="rcard"><thead><tr><th>Date</th><th>Référence</th><th>Client</th><th>Note</th><th style="text-align:right;">Montant</th></tr></thead><tbody>${operations.paymentRows.map(row => `<tr><td data-label="Date" class="mono muted">${fmtDateTime(row.date)}</td><td data-label="Référence" class="mono">${esc(row.ref)}</td><td data-label="Client">${esc(row.party)}</td><td data-label="Note" class="muted">${esc(row.note)}</td><td data-label="Montant" class="price">${money(row.amount)} DH</td></tr>`).join('')}<tr class="report-total-row"><td><strong>TOTAL PAIEMENTS</strong></td><td></td><td></td><td></td><td data-label="Montant"><strong>${money(operations.paymentsAmount)} DH</strong></td></tr></tbody></table></div></div>` : ''}
+      <div class="report-stats-export">${reportSectionActions('stats')}</div></div>
+      ${operations.saleRows.length ? `<div id="report-sales" class="report-section ${reportSectionEnabled('sales') ? '' : 'report-section-hidden'}"><div class="section-title">Ventes détaillées ${reportSectionActions('sales')} <a class="report-back-to-menu" href="#reportSectionMenu" aria-label="Revenir au menu du rapport" title="Revenir au menu du rapport">↑</a></div><div style="overflow-x:auto;"><table class="rcard report-detail-table"><thead><tr><th>Date</th><th>Produit / Code P</th><th>Catégorie</th><th>Qté</th><th>Prix achat</th><th>Prix vente</th><th>Remise</th><th>Net</th><th>Coût</th><th>Marge</th></tr></thead><tbody>${operations.saleRows.map(row => `<tr><td data-label="Date" class="mono muted">${fmtDateTime(row.date)}</td><td data-label="Produit / Code P"><strong>${esc(row.product)}</strong><div class="muted mono" style="font-size:10px;">${esc(row.sku)}</div></td><td data-label="Catégorie" class="muted">${esc(row.category || '—')}</td><td data-label="Qté" class="mono">${row.qty}</td><td data-label="Prix achat" class="mono">${money(row.unitCost)} DH</td><td data-label="Prix vente" class="price">${money(row.unitPrice)} DH</td><td data-label="Remise" class="mono">${money(row.discount)} DH</td><td data-label="Net" class="price">${money(row.net)} DH</td><td data-label="Coût" class="mono">${money(row.cost)} DH</td><td data-label="Marge" class="price" style="color:var(--success)">${money(row.margin)} DH</td></tr>`).join('')}<tr class="report-total-row"><td data-label="Total"><strong>TOTAL VENTES</strong></td><td></td><td></td><td data-label="Qté"><strong>${operations.salesUnits}</strong></td><td></td><td></td><td data-label="Remise"><strong>${money(operations.salesDiscount)} DH</strong></td><td data-label="Net"><strong>${money(operations.salesAmount)} DH</strong></td><td data-label="Coût"><strong>${money(operations.salesCost)} DH</strong></td><td data-label="Marge"><strong>${money(operations.salesMargin)} DH</strong></td></tr></tbody></table></div></div>` : emptyState('history', 'Aucune vente', 'Aucune vente sur cette période.')}
+      ${operations.purchaseRows.length ? `<div id="report-purchases" class="report-section ${reportSectionEnabled('purchases') ? '' : 'report-section-hidden'}"><div class="section-title">Achats détaillés ${reportSectionActions('purchases')} <a class="report-back-to-menu" href="#reportSectionMenu" aria-label="Revenir au menu du rapport" title="Revenir au menu du rapport">↑</a></div><div style="overflow-x:auto;"><table class="rcard report-detail-table"><thead><tr><th>Date</th><th>Produit / Code P</th><th>Catégorie</th><th>Qté</th><th>Prix achat</th><th>Prix vente prévu</th><th>Total achat</th><th>Valeur vente</th><th>Marge potentielle</th></tr></thead><tbody>${operations.purchaseRows.map(row => `<tr><td data-label="Date" class="mono muted">${fmtDateTime(row.date)}</td><td data-label="Produit / Code P"><strong>${esc(row.product)}</strong><div class="muted mono" style="font-size:10px;">${esc(row.sku)}</div></td><td data-label="Catégorie" class="muted">${esc(row.category || '—')}</td><td data-label="Qté" class="mono">${row.qty}</td><td data-label="Prix achat" class="mono">${money(row.unitCost)} DH</td><td data-label="Prix vente prévu" class="price">${money(row.unitPrice)} DH</td><td data-label="Total achat" class="mono">${money(row.totalPurchase)} DH</td><td data-label="Valeur vente" class="price">${money(row.saleValue)} DH</td><td data-label="Marge potentielle" class="price" style="color:var(--success)">${money(row.potentialMargin)} DH</td></tr>`).join('')}<tr class="report-total-row"><td data-label="Total"><strong>TOTAL ACHATS</strong></td><td></td><td></td><td data-label="Qté"><strong>${operations.purchaseUnits}</strong></td><td></td><td></td><td data-label="Total achat"><strong>${money(operations.purchasesAmount)} DH</strong></td><td data-label="Valeur vente"><strong>${money(operations.purchaseProjectedSale)} DH</strong></td><td data-label="Marge potentielle"><strong>${money(operations.purchasePotentialMargin)} DH</strong></td></tr></tbody></table></div></div>` : emptyState('cart', 'Aucun achat', 'Aucun achat sur cette période.')}
+      <div id="report-purchase-bons" class="report-section ${reportSectionEnabled('purchaseBons') ? '' : 'report-section-hidden'}"><div class="section-title">Synthèse des bons d’achat ${reportSectionActions('purchaseBons')} <a class="report-back-to-menu" href="#reportSectionMenu" aria-label="Revenir au menu du rapport" title="Revenir au menu du rapport">↑</a></div><label class="checkbox-row" style="margin:4px 0 10px;"><input type="checkbox" id="includeEquipmentInPurchaseBons" ${f.includeEquipmentInPurchaseBons ? 'checked' : ''}> Ajouter au coût total le montant des produits enregistrés comme équipements issus de chaque bon</label>${purchaseBonRows.length ? `<div style="overflow-x:auto;"><table class="rcard report-detail-table"><thead><tr><th>N Bon</th><th>Date</th><th>Fournisseur</th><th style="text-align:right;">Coût total</th></tr></thead><tbody>${purchaseBonRows.map(row => `<tr><td data-label="N Bon" class="mono"><strong>${esc(row.bonNumber)}</strong></td><td data-label="Date" class="mono muted">${fmtDateTime(row.date)}</td><td data-label="Fournisseur">${esc(row.supplier || 'Non spécifié')}</td><td data-label="Coût total" class="price">${money(row.total)} DH</td></tr>`).join('')}<tr class="report-total-row"><td data-label="Total"><strong>TOTAL</strong></td><td></td><td></td><td data-label="Coût total" class="price"><strong>${money(purchaseBonRows.reduce((sum, row) => sum + row.total, 0))} DH</strong></td></tr></tbody></table></div>` : emptyState('cart', 'Aucun bon d’achat', 'Aucun bon sur cette période.')}</div>
+      ${operations.paymentRows.length ? `<div id="report-payments" data-report-section="payments" class="report-section ${reportSectionEnabled('payments') ? '' : 'report-section-hidden'}"><div class="section-title">Paiements clients ${reportSectionActions('payments')}</div><div style="overflow-x:auto;"><table class="rcard"><thead><tr><th>Date</th><th>Référence</th><th>Client</th><th>Note</th><th style="text-align:right;">Montant</th></tr></thead><tbody>${operations.paymentRows.map(row => `<tr><td data-label="Date" class="mono muted">${fmtDateTime(row.date)}</td><td data-label="Référence" class="mono">${esc(row.ref)}</td><td data-label="Client">${esc(row.party)}</td><td data-label="Note" class="muted">${esc(row.note)}</td><td data-label="Montant" class="price">${money(row.amount)} DH</td></tr>`).join('')}<tr class="report-total-row"><td><strong>TOTAL PAIEMENTS</strong></td><td></td><td></td><td></td><td data-label="Montant"><strong>${money(operations.paymentsAmount)} DH</strong></td></tr></tbody></table></div></div>` : ''}
     </div>
     <div id="report-stock" class="card report-stock-card ${reportSectionEnabled('stock') ? '' : 'report-section-hidden'}" style="padding:18px;margin-bottom:18px;">
-      <div class="section-title">Situation du stock <a class="report-back-to-menu" href="#reportSectionMenu" aria-label="Revenir au menu du rapport" title="Revenir au menu du rapport">↑</a></div>
+      <div class="section-title">Situation du stock ${reportSectionActions('stock')} <a class="report-back-to-menu" href="#reportSectionMenu" aria-label="Revenir au menu du rapport" title="Revenir au menu du rapport">↑</a></div>
       <div class="muted" style="font-size:12px;margin:4px 0 14px 0;">État actuel du stock disponible, valorisé au prix d’achat et au prix de vente prévu. Cette vue ne modifie pas la consommation FIFO.</div>
       <div class="toolbar" style="margin-bottom:14px;"><div class="muted mono" style="font-size:12px;">${stockData.totalProducts} produit${stockData.totalProducts !== 1 ? 's' : ''} en stock · ${stockData.totalQuantity} unité${stockData.totalQuantity !== 1 ? 's' : ''}</div><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-sm" id="exportStockSituationPDF">${ICONS.download}PDF stock</button><button class="btn btn-sm" id="exportStockSituationXLSX">${ICONS.download}Excel stock</button></div></div>
       <div class="grid dash-stats" style="margin-bottom:14px;"><div class="card stat-card"><div class="stat-label">Valeur au prix d’achat</div><div class="stat-value">${money(stockData.totalCostValue)} <span style="font-size:13px;color:var(--muted)">DH</span></div></div></div>
@@ -3491,8 +3544,8 @@ function renderMarginReports() {
       <div class="card stat-card"><div class="stat-label">Transactions</div><div class="stat-value">${data.sales.length}</div><div class="stat-delta">${data.productRows.length} produit${data.productRows.length !== 1 ? 's' : ''} vendu${data.productRows.length !== 1 ? 's' : ''}</div></div>
     </div>
     <div class="grid" style="grid-template-columns:1.25fr 1fr;align-items:start;">
-      <div id="report-product-performance" class="card ${reportSectionEnabled('productPerformance') ? '' : 'report-section-hidden'}" style="padding:18px;"><div class="section-title">Performance par produit <a class="report-back-to-menu" href="#reportSectionMenu" aria-label="Revenir au menu du rapport" title="Revenir au menu du rapport">↑</a></div>${data.productRows.length ? `<table class="rcard"><thead><tr><th>Produit</th><th>Unités</th><th>CA net</th><th>Coût</th><th>Marge</th><th>Taux</th></tr></thead><tbody>${data.productRows.map(r => `<tr><td data-label="Produit"><strong>${esc(r.product)}</strong><div class="muted mono" style="font-size:10.5px;">${esc(r.sku)}</div></td><td data-label="Unités" class="mono">${r.units}</td><td data-label="CA net" class="price">${money(r.net)}</td><td data-label="Coût" class="mono">${money(r.cost)}</td><td data-label="Marge" class="price" style="color:var(--success)">${money(r.margin)}</td><td data-label="Taux" class="mono">${r.marginRate.toFixed(1)}%</td></tr>`).join('')}</tbody></table>` : emptyState('history', 'Aucune vente', 'Modifiez la période ou les filtres.')}</div>
-      <div id="report-daily-evolution" class="card ${reportSectionEnabled('dailyEvolution') ? '' : 'report-section-hidden'}" style="padding:18px;"><div class="section-title">Évolution par jour <a class="report-back-to-menu" href="#reportSectionMenu" aria-label="Revenir au menu du rapport" title="Revenir au menu du rapport">↑</a></div>${data.dayRows.length ? `<table class="rcard"><thead><tr><th>Date</th><th>Ventes</th><th>CA net</th><th>Marge</th></tr></thead><tbody>${data.dayRows.map(r => `<tr><td data-label="Date" class="mono">${r.date === 'inconnue' ? 'Inconnue' : fmtDate(`${r.date}T00:00:00`)}</td><td data-label="Ventes" class="mono">${r.sales} · ${r.units} unité${r.units !== 1 ? 's' : ''}</td><td data-label="CA net" class="price">${money(r.revenue)}</td><td data-label="Marge" class="price" style="color:var(--success)">${money(r.margin)}</td></tr>`).join('')}</tbody></table>` : emptyState('history', 'Aucune donnée', 'Les ventes apparaîtront ici.')}</div>
+      <div id="report-product-performance" data-report-section="productPerformance" class="card ${reportSectionEnabled('productPerformance') ? '' : 'report-section-hidden'}" style="padding:18px;"><div class="section-title">Performance par produit ${reportSectionActions('productPerformance')} <a class="report-back-to-menu" href="#reportSectionMenu" aria-label="Revenir au menu du rapport" title="Revenir au menu du rapport">↑</a></div>${data.productRows.length ? `<table class="rcard"><thead><tr><th>Produit</th><th>Unités</th><th>CA net</th><th>Coût</th><th>Marge</th><th>Taux</th></tr></thead><tbody>${data.productRows.map(r => `<tr><td data-label="Produit"><strong>${esc(r.product)}</strong><div class="muted mono" style="font-size:10.5px;">${esc(r.sku)}</div></td><td data-label="Unités" class="mono">${r.units}</td><td data-label="CA net" class="price">${money(r.net)}</td><td data-label="Coût" class="mono">${money(r.cost)}</td><td data-label="Marge" class="price" style="color:var(--success)">${money(r.margin)}</td><td data-label="Taux" class="mono">${r.marginRate.toFixed(1)}%</td></tr>`).join('')}</tbody></table>` : emptyState('history', 'Aucune vente', 'Modifiez la période ou les filtres.')}</div>
+      <div id="report-daily-evolution" data-report-section="dailyEvolution" class="card ${reportSectionEnabled('dailyEvolution') ? '' : 'report-section-hidden'}" style="padding:18px;"><div class="section-title">Évolution par jour ${reportSectionActions('dailyEvolution')} <a class="report-back-to-menu" href="#reportSectionMenu" aria-label="Revenir au menu du rapport" title="Revenir au menu du rapport">↑</a></div>${data.dayRows.length ? `<table class="rcard"><thead><tr><th>Date</th><th>Ventes</th><th>CA net</th><th>Marge</th></tr></thead><tbody>${data.dayRows.map(r => `<tr><td data-label="Date" class="mono">${r.date === 'inconnue' ? 'Inconnue' : fmtDate(`${r.date}T00:00:00`)}</td><td data-label="Ventes" class="mono">${r.sales} · ${r.units} unité${r.units !== 1 ? 's' : ''}</td><td data-label="CA net" class="price">${money(r.revenue)}</td><td data-label="Marge" class="price" style="color:var(--success)">${money(r.margin)}</td></tr>`).join('')}</tbody></table>` : emptyState('history', 'Aucune donnée', 'Les ventes apparaîtront ici.')}</div>
     </div>
     <div class="muted" style="font-size:11.5px;margin-top:12px;">Le rapport PDF inclut les ventes, achats et encaissements de la période sélectionnée. Le net correspond aux ventes moins les achats ; les encaissements sont présentés séparément.</div>
   `;
@@ -4051,7 +4104,7 @@ function downloadBonPDF(kind, record) {
   const tableHeader=()=>{doc.setFillColor(238,242,241);doc.rect(margin,y-4,pageWidth-2*margin,8,'F');doc.setFont('helvetica','bold');doc.setFontSize(8);columns.forEach(([label,x])=>doc.text(label,x,y));y+=7;doc.setFont('helvetica','normal');};
   header(); tableHeader();
   (record.items||[]).forEach(item=>{const nameLines=doc.splitTextToSize(String(item.name||'Produit'),isPurchase?58:68);const codeLines=isPurchase?doc.splitTextToSize(String(item.sku||'—'),30):[];const rowHeight=Math.max(nameLines.length,codeLines.length,1)*4.2+4;if(y+rowHeight>bottom)newPage(),tableHeader();nameLines.forEach((line,i)=>doc.text(line,18,y+i*4.2));if(isPurchase){codeLines.forEach((line,i)=>doc.text(line,82,y+i*4.2));doc.text(String(item.qty||0),118,y);doc.text(`${money(item.unitCost)} DH`,137,y);doc.text(`${money((Number(item.qty)||0)*(Number(item.unitCost)||0))} DH`,166,y);}else{doc.text(String(item.qty||0),94,y);doc.text(`${money(item.price)} DH`,116,y);doc.text('0,00 DH',148,y);doc.text(`${money((Number(item.qty)||0)*(Number(item.price)||0))} DH`,174,y);}y+=rowHeight;doc.setDrawColor(220,224,223);doc.line(margin,y-2,pageWidth-margin,y-2);});
-  if(y+28>bottom)newPage(); doc.setFont('helvetica','bold');doc.setFontSize(10);doc.text(isPurchase?'TOTAL ACHAT :':'TOTAL :',140,y+7);doc.text(`${money(record.total||0)} DH`,pageWidth-margin,y+7,{align:'right'});doc.setFontSize(8);doc.setFont('helvetica','normal');doc.text(`Page ${pageNumber}`,pageWidth-margin,287,{align:'right'});
+  if(y+28>bottom)newPage(); doc.setFont('helvetica','bold');doc.setFontSize(10);doc.text(isPurchase?'TOTAL ACHAT :':'TOTAL :',140,y+7);doc.text(`${money(record.total||0)} DH`,pageWidth-margin,y+7,{align:'right'}); finalizePdfPagination(doc);
   doc.save(`${isPurchase?'bon-achat':'bon-livraison'}-${isPurchase ? (record.bonNumber || record.id) : (record.number || record.id)}.pdf`);
 }
 function shareBon(kind, record, channel) {
@@ -4457,11 +4510,12 @@ function excelBool(value) {
   return ['true', '1', 'oui', 'yes', 'vrai', 'archivé', 'archive'].includes(String(value || '').trim().toLowerCase());
 }
 function downloadExcelRows(rows, filename, sheetName) {
-  if (typeof XLSX === 'undefined') { toast('Bibliothèque Excel indisponible — vérifiez votre connexion.'); return false; }
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(rows || []);
-  XLSX.utils.book_append_sheet(wb, ws, sheetName || 'Données');
-  XLSX.writeFile(wb, filename);
+  const excel = window.XLSX;
+  if (!excel) { toast('Bibliothèque Excel indisponible — vérifiez votre connexion.'); return false; }
+  const wb = excel.utils.book_new();
+  const ws = excel.utils.json_to_sheet(rows || []);
+  excel.utils.book_append_sheet(wb, ws, sheetName || 'Données');
+  excel.writeFile(wb, filename);
   return true;
 }
 function protectExcelWorksheet(ws, unlockedRanges = []) {
@@ -5013,8 +5067,6 @@ async function importExcelWorkbook(file) {
       (r['Seuil stock bas'] !== '' && (!Number.isInteger(excelNumber(r['Seuil stock bas'])) || excelNumber(r['Seuil stock bas']) < 0)));
     if (invalidProductRow) { toast('La feuille « Produits » contient un SKU, un nom ou un seuil invalide.'); return; }
 
-    const duplicateSkus = prodRows.map(r => String(r['SKU'] || '').trim().toLowerCase()).filter((sku, index, list) => sku && list.indexOf(sku) !== index);
-    if (duplicateSkus.length) { toast(`SKU en double dans le fichier : ${duplicateSkus[0]}`); return; }
     const invalidStockRow = stkRows.find(r => {
       const qty = excelNumber(r['Quantité en stock']);
       const cost = excelNumber(r["Prix d'achat (DH)"], 0);
@@ -5036,55 +5088,70 @@ async function importExcelWorkbook(file) {
     const newProducts = [];
     const purchaseItems = [];
     const oldProductsBySku = new Map(state.products.filter(p => p.sku).map(p => [String(p.sku).trim().toLowerCase(), p]));
+    const importedProductSkus = new Set();
     prodRows.forEach(r => {
       const sku = String(r['SKU'] || '').trim();
-      if (!sku) return;
+      const normalizedSku = sku.toLowerCase();
+      if (!sku || oldProductsBySku.has(normalizedSku) || importedProductSkus.has(normalizedSku)) return;
+      importedProductSkus.add(normalizedSku);
       const id = uid('p');
-      const oldProduct = oldProductsBySku.get(sku.toLowerCase());
       newProducts.push({
         id, name: String(r['Nom du produit'] || ''), brand: String(r['Marque'] || ''),
         model: String(r['Modèle / Compatibilité'] || ''), category: String(r['Catégorie'] || ''),
         sku, lowStock: r['Seuil stock bas'] !== '' ? Number(r['Seuil stock bas']) : 3,
-        photo: oldProduct ? safeImageSrc(oldProduct.photo) || null : null,
-        archived: !!(oldProduct && oldProduct.archived),
+        photo: null, archived: false,
       });
-      const fromStk = stkBySku[sku.toLowerCase()];
+      const fromStk = stkBySku[normalizedSku];
       const qty = fromStk ? fromStk.qty : excelNumber(r['Qté en stock (lié)'], 0);
       const cost = fromStk && fromStk.cost != null ? fromStk.cost : excelNumber(r["Prix d'achat (lié)"], 0);
-      const price = fromStk && fromStk.price != null ? fromStk.price
-        : (qty ? excelNumber(r['Valeur stock vente (lié)'], 0) / qty : 0) || cost * 2;
-      if (qty > 0 || cost || price) {
-        purchaseItems.push({ productId: id, name: newProducts[newProducts.length - 1].name, qty: qty || 0, unitCost: cost || 0, unitPrice: price || 0, qtyRemaining: qty || 0 });
-      }
+      const price = fromStk && fromStk.price != null ? fromStk.price : (qty ? excelNumber(r['Valeur stock vente (lié)'], 0) / qty : 0) || cost * 2;
+      if (qty > 0 || cost || price) purchaseItems.push({ productId: id, name: newProducts[newProducts.length - 1].name, sku, qty: qty || 0, unitCost: cost || 0, unitPrice: price || 0, qtyRemaining: qty || 0 });
     });
 
-    const newClients = cliRows
-      .filter(r => String(r['Code client'] || r['Nom'] || '').trim())
-      .map(r => ({
-        id: uid('c'), clientCode: String(r['Code client'] || '') || nextClientCode(),
-        name: String(r['Nom'] || ''), phone: String(r['Téléphone'] || ''),
-        email: String(r['Email'] || ''), notes: String(r['Notes'] || ''),
-      }));
+    const existingClientCodes = new Set(state.clients.map(c => String(c.clientCode || '').trim().toLowerCase()).filter(Boolean));
+    const existingClientKeys = new Set(state.clients.map(c => `${String(c.phone || '').trim()}|${normalizeSearchText(c.name || '')}`));
+    const newClients = [];
+    cliRows.forEach(r => {
+      const code = String(r['Code client'] || '').trim();
+      const name = String(r['Nom'] || '').trim();
+      if (!code && !name) return;
+      const key = `${String(r['Téléphone'] || '').trim()}|${normalizeSearchText(name)}`;
+      if ((code && existingClientCodes.has(code.toLowerCase())) || existingClientKeys.has(key)) return;
+      if (code) existingClientCodes.add(code.toLowerCase());
+      existingClientKeys.add(key);
+      newClients.push({ id: uid('c'), clientCode: code || nextClientCode(), name, phone: String(r['Téléphone'] || ''), email: String(r['Email'] || ''), notes: String(r['Notes'] || '') });
+    });
 
-    if (!confirmLocalized(`Importer ${newProducts.length} produit(s) et ${newClients.length} client(s) depuis ce classeur ? Cela remplace le catalogue produits, le stock/prix et les clients actuels. Les photos existantes seront perdues.`)) return;
-
-    state.products = newProducts;
-    state.clients = newClients;
+    const productByImportSku = new Map([...state.products, ...newProducts].filter(p => p.sku).map(p => [String(p.sku).trim().toLowerCase(), p]));
+    const importedPurchaseGroups = new Map();
     if (achRows.length) {
-      const groups = new Map();
-      achRows.forEach(r => { const key = String(r['ID achat'] || r['N Bon'] || `import-${r['Date opération ISO'] || 'now'}`).trim(); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(r); });
-      state.purchases = [...groups.entries()].map(([key, group]) => {
-        const first = group[0];
-        const items = group.map(r => { const prod = newProducts.find(x => x.sku.toLowerCase() === String(r.SKU || '').trim().toLowerCase()); const qty = Number(r.Quantité) || 0; return { id: String(r['ID ligne'] || '').trim() || uid('pli'), productId: prod?.id || '', name: String(r.Produit || prod?.name || ''), sku: prod?.sku || String(r.SKU || ''), bonNumber: String(r['N Bon'] || first['N Bon'] || '').trim(), qty, qtyRemaining: Math.max(0, Math.min(qty, Number(r['Quantité restante'] == null || r['Quantité restante'] === '' ? qty : r['Quantité restante']) || 0)), unitCost: Number(r["Prix d'achat (DH)"]) || 0, unitPrice: Number(r['Prix de vente (DH)']) || 0 }; }).filter(it => it.productId && it.qty > 0);
-        return { id: key.startsWith('pu_') ? key : uid('pu'), bonNumber: String(first['N Bon'] || '').trim() || nextPurchaseBonNumber(), date: excelDate(first['Date opération ISO'] || first.Date), supplierId: findSupplierByImport(first['Code fournisseur'], first.Fournisseur)?.id || null, items, total: items.reduce((sum,it) => sum + it.qty * it.unitCost, 0), note: String(first.Note || 'Import depuis classeur Excel') };
-      }).filter(pu => pu.items.length);
-    } else {
-      state.purchases = purchaseItems.length ? [{ id: uid('pu'), bonNumber: nextPurchaseBonNumber(), date: new Date().toISOString(), supplierId: null, items: purchaseItems, total: purchaseItems.reduce((s, it) => s + it.qty * it.unitCost, 0), note: 'Import depuis classeur Excel' }] : [];
+      achRows.forEach(r => {
+        const key = String(r['ID achat'] || r['N Bon'] || `import-${r['Date opération ISO'] || 'now'}`).trim();
+        if (!importedPurchaseGroups.has(key)) importedPurchaseGroups.set(key, []);
+        importedPurchaseGroups.get(key).push(r);
+      });
     }
+    const existingPurchaseKeys = new Set(state.purchases.flatMap(pu => [String(pu.id || '').trim(), `${String(pu.bonNumber || '').trim().toLowerCase()}|${String(pu.date || '').slice(0,10)}`]));
+    const newPurchases = [];
+    if (achRows.length) {
+      importedPurchaseGroups.forEach((group, key) => {
+        const first = group[0];
+        const purchaseKey = `${String(first['N Bon'] || '').trim().toLowerCase()}|${String(first['Date opération ISO'] || first.Date || '').slice(0,10)}`;
+        if (existingPurchaseKeys.has(key) || existingPurchaseKeys.has(purchaseKey)) return;
+        const items = group.map(r => { const prod = productByImportSku.get(String(r.SKU || '').trim().toLowerCase()); const qty = Number(r.Quantité) || 0; return { id: String(r['ID ligne'] || '').trim() || uid('pli'), productId: prod?.id || '', name: String(r.Produit || prod?.name || ''), sku: prod?.sku || String(r.SKU || ''), bonNumber: String(r['N Bon'] || first['N Bon'] || '').trim(), qty, qtyRemaining: Math.max(0, Math.min(qty, Number(r['Quantité restante'] == null || r['Quantité restante'] === '' ? qty : r['Quantité restante']) || 0)), unitCost: Number(r["Prix d'achat (DH)"]) || 0, unitPrice: Number(r['Prix de vente (DH)']) || 0 }; }).filter(it => it.productId && newProducts.some(prod => prod.id === it.productId) && it.qty > 0);
+        if (items.length) newPurchases.push({ id: key.startsWith('pu_') ? key : uid('pu'), bonNumber: String(first['N Bon'] || '').trim() || nextPurchaseBonNumber(), date: excelDate(first['Date opération ISO'] || first.Date), supplierId: findSupplierByImport(first['Code fournisseur'], first.Fournisseur)?.id || null, items, total: items.reduce((sum,it) => sum + it.qty * it.unitCost, 0), note: String(first.Note || 'Import depuis classeur Excel') });
+      });
+    } else if (purchaseItems.length) {
+      newPurchases.push({ id: uid('pu'), bonNumber: nextPurchaseBonNumber(), date: new Date().toISOString(), supplierId: null, items: purchaseItems, total: purchaseItems.reduce((sum, it) => sum + it.qty * it.unitCost, 0), note: 'Import depuis classeur Excel' });
+    }
+    if (!confirmLocalized(`Ajouter ${newProducts.length} nouveau(x) produit(s), ${newClients.length} nouveau(x) client(s) et ${newPurchases.length} nouvel(le)(s) achat(s) depuis ce classeur ? Les doublons existants seront ignorés.`)) return;
+    state.products.push(...newProducts);
+    state.clients.push(...newClients);
+    state.purchases.push(...newPurchases);
     const saveResults = await Promise.all([saveProducts(), saveClients(), savePurchases()]);
     if (saveResults.some(result => result === null)) throw new Error('Échec d’écriture des données importées');
-    await logOperation('Import Excel', `${newProducts.length} produit(s), ${newClients.length} client(s)`);
-    toast('Classeur Excel importé avec succès');
+    await logOperation('Import Excel', `${newProducts.length} nouveau(x) produit(s), ${newClients.length} nouveau(x) client(s), ${newPurchases.length} achat(s)`);
+    toast(`${newProducts.length} nouveau(x) produit(s) importé(s), doublons ignorés`);
     render();
   } catch (e) {
     console.error(e);
@@ -5108,8 +5175,14 @@ function renderClearStorageModal() {
         <button class="btn btn-danger" id="clearSalesBtn" style="justify-content:flex-start;text-align:left;width:100%;">
           Supprimer les ventes &amp; paiements
         </button>
+        <button class="btn btn-danger" id="clearCatalogBtn" style="justify-content:flex-start;text-align:left;width:100%;">
+          Supprimer produits, catégories, clients et fournisseurs
+        </button>
+        <button class="btn btn-danger" id="clearServicesRechargesBtn" style="justify-content:flex-start;text-align:left;width:100%;">
+          Supprimer services, comptes rechargeables et recharges
+        </button>
         <button class="btn btn-danger" id="clearAllStorageBtn" style="justify-content:flex-start;text-align:left;width:100%;">
-          Tout vider (produits, stock, achats, ventes, clients, fournisseurs, utilisateurs...)
+          Tout vider (toutes les données et tous les paramètres de l’application)
         </button>
       </div>
       <div class="modal-actions" style="margin-top:18px;">
@@ -5141,10 +5214,27 @@ async function clearSalesAndPayments() {
   render();
 }
 
+async function clearCatalogData() {
+  if (!confirmLocalized('Supprimer tous les produits, catégories, clients et fournisseurs ? Cette action est irréversible.')) return;
+  state.products = []; state.categories = []; state.clients = []; state.suppliers = [];
+  await Promise.all([saveProducts(), saveCategories(), saveClients(), saveSuppliers()]);
+  await logOperation('Réinitialisation', 'Catalogue, clients et fournisseurs supprimés');
+  state.showClearStorageModal = false; toast('Catalogue, clients et fournisseurs supprimés'); render();
+}
+
+async function clearServicesAndRecharges() {
+  if (!confirmLocalized('Supprimer tous les services, comptes rechargeables et recharges ? Cette action est irréversible.')) return;
+  state.services = []; state.serviceCategories = []; state.rechargeAccounts = []; state.rechargeMarginRate = 0;
+  await Promise.all([saveServices(), saveServiceCategories(), saveRechargeAccounts(), saveRechargeMarginRate()]);
+  await logOperation('Réinitialisation', 'Services et recharges supprimés');
+  state.showClearStorageModal = false; toast('Services et recharges supprimés'); render();
+}
+
 async function clearAllStorage() {
   if (!confirmLocalized('Vider TOUT le stockage du site (produits, stock, achats, ventes, clients, fournisseurs, utilisateurs, historique...) ? Cette action est irréversible et la page va se recharger.')) return;
-  const keys = ['shop:capital-amount', 'shop:products', 'shop:clients', 'shop:sales', 'shop:users', 'shop:payments', 'shop:oplog',
-    'shop:suppliers', 'shop:purchases', 'shop:invoices', 'shop:equipment-purchases', 'shop:expenses', 'shop:services', 'shop:service-categories', 'shop:recharge-accounts', 'shop:recharge-margin-rate', 'shop:generated-documents', 'shop:session', 'shop:theme-pref'];
+  const keys = ['shop:capital-amount', 'shop:products', 'shop:categories', 'shop:clients', 'shop:sales', 'shop:users', 'shop:payments', 'shop:oplog',
+    'shop:suppliers', 'shop:purchases', 'shop:invoices', 'shop:equipment-purchases', 'shop:expenses', 'shop:services', 'shop:service-categories', 'shop:recharge-accounts', 'shop:recharge-margin-rate',
+    'shop:replenishment-bons', 'shop:replenishment-consumed-sales', 'shop:replenishment-consumed-products', 'shop:replenishment-sales-filters', 'shop:generated-documents', 'shop:report-filters', 'shop:branding', 'shop:session', 'shop:theme-pref'];
   for (const key of keys) {
     const shared = (key === 'shop:session' || key === 'shop:theme-pref') ? false : true;
     try { await safeDelete(key, shared); } catch (e) { /* ignore */ }
@@ -5189,9 +5279,10 @@ function bindGlobalDelegatedEvents() {
   if (window.__phoneStockDelegationBound) return;
   window.__phoneStockDelegationBound = true;
   document.addEventListener('click', event => {
-    const target = event.target.closest('[data-nav], [data-sort-target], [data-history-tab], [data-purchases-tab], [data-dashboard-chart], [data-history-page], #generatePurchaseFromSalesBtn, .report-section-menu a, .report-back-to-menu');
+    const target = event.target.closest('[data-nav], [data-sort-target], [data-history-tab], [data-purchases-tab], [data-dashboard-chart], [data-history-page], [data-report-export], #generatePurchaseFromSalesBtn, .report-section-menu a, .report-back-to-menu');
     if (!target) return;
     if (target.id === 'generatePurchaseFromSalesBtn') { event.preventDefault(); openPurchaseFromSales(); return; }
+    if (target.dataset.reportExport) { const [key, format] = target.dataset.reportExport.split(':'); const section = target.closest('[data-report-section], .report-section, .report-financial-summary, #report-stats'); (async () => { try { if (format === 'xlsx') { await ensureXlsxLoaded(); if (!window.XLSX) throw new Error('XLSX indisponible'); } else { await ensurePdfLoaded(); if (!window.jspdf?.jsPDF) throw new Error('jsPDF indisponible'); } exportRenderedReportSection(key, format, section); } catch (e) { console.error('Export section', key, format, e); toast(`${format === 'xlsx' ? 'Bibliothèque Excel' : 'Bibliothèque PDF'} indisponible.`); } })(); return; }
     if (target.matches('.report-section-menu a, .report-back-to-menu')) {
       event.preventDefault();
       document.getElementById(String(target.getAttribute('href') || '').replace(/^#/, ''))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -5894,6 +5985,10 @@ function bindEvents() {
   if (clearPurchasesStockBtn) clearPurchasesStockBtn.addEventListener('click', clearPurchasesAndStock);
   const clearSalesBtn = document.getElementById('clearSalesBtn');
   if (clearSalesBtn) clearSalesBtn.addEventListener('click', clearSalesAndPayments);
+  const clearCatalogBtn = document.getElementById('clearCatalogBtn');
+  if (clearCatalogBtn) clearCatalogBtn.addEventListener('click', clearCatalogData);
+  const clearServicesRechargesBtn = document.getElementById('clearServicesRechargesBtn');
+  if (clearServicesRechargesBtn) clearServicesRechargesBtn.addEventListener('click', clearServicesAndRecharges);
   const clearAllStorageBtn = document.getElementById('clearAllStorageBtn');
   if (clearAllStorageBtn) clearAllStorageBtn.addEventListener('click', clearAllStorage);
 

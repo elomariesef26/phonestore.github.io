@@ -149,6 +149,9 @@
   .report-period-field{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;}
   .report-period-field input{min-width:145px;}
   .report-total-row{background:var(--surface-2);font-weight:700;}
+  .report-section-actions{display:inline-flex;gap:5px;align-items:center;margin-left:10px;vertical-align:middle;}
+  .report-section-actions .btn{font-size:10.5px;padding:4px 8px;}
+  .report-stats-export{grid-column:1/-1;display:flex;justify-content:flex-end;margin-top:-8px;}
 .report-detail-table{min-width:980px;}
 .sales-date-column{width:118px;min-width:118px;white-space:nowrap}.sales-payment-column{width:32px;min-width:32px;max-width:32px;text-align:center;white-space:nowrap}.sales-payment-column::before{content:none!important}
 
